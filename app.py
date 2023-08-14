@@ -1,7 +1,7 @@
 from flask import Flask, redirect, render_template
 from sqlalchemy.sql import text
 from flask_debugtoolbar import DebugToolbarExtension
-
+from sqlalchemy.exc import IntegrityError
 from models import db, connect_db, Playlist, Song, PlaylistSong
 from forms import NewSongForPlaylistForm, SongForm, PlaylistForm
 
@@ -18,8 +18,8 @@ app.config['SECRET_KEY'] = "I'LL NEVER TELL!!"
 
 # Having the Debug Toolbar show redirects explicitly is often useful;
 # however, if you want to turn it off, you can uncomment this line:
-#
-    app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
+
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
 
 debug = DebugToolbarExtension(app)
 
@@ -107,15 +107,18 @@ def add_song_to_playlist(playlist_id):
     form = NewSongForPlaylistForm()
 
     # Restrict form to songs not already on this playlist
-    curr_on_playlist = [s.id for s in playlist.songs]
+    curr_on_playlist = [s.song_id for s in playlist.songs]
     form.song.choices = [(s.id, s.title) for s in Song.query.filter(Song.id.notin_(curr_on_playlist)).all()]
 
     if form.validate_on_submit():
         playlist_song = PlaylistSong(playlist_id=playlist_id, song_id=int(form.song.data))
-        db.session.add(playlist_song)
-        db.session.commit()
-
-        return redirect(f"/playlists/{playlist_id}")
+        
+        try:
+            db.session.add(playlist_song)
+            db.session.commit()
+            return redirect(f"/playlists/{playlist_id}")
+        except IntegrityError:  # If song already exists in the playlist
+            db.session.rollback()  # Roll back the transaction
+            flash("This song is already in the playlist!", "error")
 
     return render_template("add_song_to_playlist.html", playlist=playlist, form=form)
-
